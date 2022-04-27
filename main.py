@@ -1,10 +1,12 @@
 import network
 import BME280
 import json
-from machine import SoftI2C, Pin, I2C
+from machine import SoftI2C, Pin, I2C, RTC
 import machine
 import ubinascii
 from umqttsimple import MQTTClient
+import time
+import urequests
 
 # init bme280
 i2c = I2C(scl=Pin(22), sda=Pin(21), freq=10000)
@@ -31,16 +33,6 @@ while not sta_if.isconnected():
     pass
 print('network config:', sta_if.ifconfig())
 
-# while True:
-#     # read bme280
-#     temperature = bme.temperature
-#     humidity = bme.humidity
-#     pressure = bme.pressure
-#     print('Temperature is: ', temperature)
-#     print('Humidity is: ', humidity)
-#     print('Pressure is: ', pressure)
-
-#     json = "{\"temperature\": " + str(temperature) + ", \"humidity\": " + str(humidity) + ", \"pressure\": " + str(pressure) + "}"
 
 def sub_cb(topic, msg):
     print((topic, msg))
@@ -62,38 +54,41 @@ def restart_and_reconnect():
     time.sleep(10)
     machine.reset()
 
+# Get datetime from site
+url = "https://worldtimeapi.org/api/timezone/Europe/Amsterdam"
+
+response = urequests.get(url)
+
+if response.status_code == 200:
+  parsed = response.json()
+  datetime_str = str(parsed["datetime"])
+  year = int(datetime_str[0:4])
+  month = int(datetime_str[5:7])
+  day = int(datetime_str[8:10])
+  hour = int(datetime_str[11:13])
+  minute = int(datetime_str[14:16])
+  second = int(datetime_str[17:19])
+  subsecond = int(round(int(datetime_str[20:26]) / 10000))
+  rtc = RTC()
+        
+  # update internal RTC
+  rtc.datetime((year, month, day, 0, hour, minute, second, subsecond))
+
 try:
     client = connect_and_subscribe()
 except OSError as e:
     restart_and_reconnect()
 
-counter = 0
 while True:
     try:
-        client.check_msg()
-        if (time.time() - last_message) > message_interval:
-            msg = b'Hello #%d' % counter
-            client.publish(topic_pub, msg)
-            last_message = time.time()
-            counter += 1
+        # read bme280
+        temperature = float(str(bme.temperature).strip("C"))
+        humidity = float(str(bme.humidity).strip("%"))
+        pressure = float(str(bme.pressure).strip("hPa"))
+        json_string = f'{{"temperature": {temperature}, "humidity": {humidity}, "pressure": {pressure}, "timestamp": "{str(time.localtime())}"}}'
+        print(json_string)
+        client.publish(topic_pub, json_string)
+        time.sleep(1)
     except OSError as e:
+        print(e)
         restart_and_reconnect()
-
-# # # connect to mqtt broker
-# # client = MQTTClient('<client_id>', '<broker_ip>')
-# # client.connect()
-
-# # # a function that publishes a message to the broker
-# # def publish_message(topic, message):
-# #     client.publish(topic, message)
-
-# # def subscribe_topic(topic):
-# #     client.subscribe(topic)
-
-# while True:
-#     temperature = read_temperature_bme()
-#     print(temperature)
-#     # publish_message('<topic>', str(temperature))
-#     # client.wait_msg()
-#     time.sleep(1)
-
